@@ -15,7 +15,7 @@ Repository Template for Go Project
 ## Getting Started
 
 ```bash
-go get github.com/opensraph/template.go
+go get github.com/hydrz/grab
 ```
 
 ## Usage
@@ -28,7 +28,7 @@ go get github.com/opensraph/template.go
 
 ## Changelog
 
-[![release](https://github.com/opensraph/template.go/actions/workflows/release.yml/badge.svg)](https://github.com/opensraph/template.go/releases)
+[![release](https://github.com/hydrz/grab/actions/workflows/release.yml/badge.svg)](https://github.com/hydrz/grab/releases)
 
 ## Contributing
 

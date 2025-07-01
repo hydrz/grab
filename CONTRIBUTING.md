@@ -8,7 +8,7 @@ Thank you for your interest in contributing! We welcome contributions from the c
 
 2. **Clone Your Fork**: Clone your forked repository to your local machine.
    ```
-   git clone https://github.com/opensraph/template.go.git
+   git clone https://github.com/hydrz/grab.git
    ```
 
 3. **Create a Branch**: Create a new branch for your feature or bug fix.
