@@ -3,5 +3,7 @@ package grab
 import "errors"
 
 var (
-	ErrNoExtractorFound = errors.New("grab: no extractor found for the given URL")
+	ErrNoExtractorFound = errors.New("no extractor found for the given URL")
+	ErrInvalidURL       = errors.New("invalid URL provided")
+	ErrFFmpegNotFound   = errors.New("ffmpeg executable not found in PATH")
 )

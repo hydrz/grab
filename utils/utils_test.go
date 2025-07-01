@@ -3,6 +3,7 @@ package utils
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestFormatBytes verifies FormatBytes returns human-readable strings for various byte sizes.
@@ -31,7 +32,7 @@ func TestFormatBytes(t *testing.T) {
 // TestFormatDuration verifies FormatDuration returns correct time strings.
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
-		input int
+		input time.Duration
 		want  string
 	}{
 		{-1, "0:00"},

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // FormatBytes converts bytes to human readable string
@@ -20,20 +21,19 @@ func FormatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// FormatDuration formats duration in seconds to human readable format
-func FormatDuration(seconds int) string {
+// FormatDuration formats a duration in seconds to a human-readable string
+func FormatDuration(seconds time.Duration) string {
 	if seconds < 0 {
-		return "0:00"
+		return "N/A"
 	}
-
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	secs := seconds % 60
+	hours := int(seconds.Hours())
+	minutes := int(seconds.Minutes()) % 60
+	secs := int(seconds.Seconds()) % 60
 
 	if hours > 0 {
-		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, secs)
+		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, secs)
 	}
-	return fmt.Sprintf("%d:%02d", minutes, secs)
+	return fmt.Sprintf("%02d:%02d", minutes, secs)
 }
 
 // SanitizeFilename removes invalid characters from filename

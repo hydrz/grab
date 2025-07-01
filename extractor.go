@@ -1,42 +1,53 @@
 package grab
 
-import "sync"
+import (
+	"net/http"
+	"sync"
+	"time"
+)
 
-// MediaType defines the type of media resource.
-type MediaType string
+// StreamType defines the type of media resource.
+type StreamType string
 
 const (
-	MediaTypeVideo MediaType = "video"
-	MediaTypeAudio MediaType = "audio"
-	MediaTypeImage MediaType = "image"
-	MediaTypeOther MediaType = "other"
+	StreamTypeVideo    StreamType = "video"
+	StreamTypeAudio    StreamType = "audio"
+	StreamTypeImage    StreamType = "image"
+	StreamTypeSubtitle StreamType = "subtitle"
+	StreamTypePlaylist StreamType = "playlist"
+	StreamTypeM3u8     StreamType = "m3u8"
+	StreamTypeDocument StreamType = "document"
+	StreamTypeOther    StreamType = "other"
 )
 
 // Stream represents a single media stream (e.g. one quality/format)
 type Stream struct {
+	ID       string            // Unique identifier for this stream
+	Title    string            // Title or name of the stream
+	Type     StreamType        // Type of the stream (video, audio, etc.)
 	URL      string            // Direct URL to this stream
 	Format   string            // Format (e.g., "mp4", "webm", "mp3")
 	Quality  string            // Quality/bitrate info (e.g., "1080p", "320kbps")
 	Size     int64             // Size in bytes (if known)
-	Duration float64           // Duration in seconds (if known)
-	Headers  map[string]string // Custom headers for this stream (optional)
+	Duration time.Duration     // Duration of the stream (if applicable)
+	Headers  http.Header       // Custom headers for this stream (optional)
 	Extra    map[string]string // Extensible fields (e.g., codec info)
 	SaveAs   string            // Suggested filename to save this stream
 }
 
 // Media represents a downloadable media resource with multiple streams.
 type Media struct {
-	Title     string            // Media title or name
-	Type      MediaType         // Media type: video, audio, image, etc.
-	Streams   map[string]Stream // All available streams (keyed by quality or id)
-	Subtitles []string          // URLs to subtitle files (optional)
-	Extra     map[string]string // Additional info for extensibility
+	Title       string            // Media title or name
+	Streams     []Stream          // All available streams (keyed by quality or id)
+	Thumbnail   string            // URL to thumbnail image (optional)
+	Description string            // Description of the media (optional)
+	Extra       map[string]string // Additional info for extensibility
 }
 
 type Extractor interface {
 	Name() string
 	CanExtract(url string) bool
-	Extract(url string, options *Option) ([]Media, error)
+	Extract(url string, options Option) ([]Media, error)
 }
 
 var extractors = make(map[string]Extractor)
