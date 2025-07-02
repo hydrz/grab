@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-func (o *Option) Logger() *slog.Logger {
+func NewLogger(o Option) *slog.Logger {
 	level := slog.LevelWarn
 	if o.Debug {
 		level = slog.LevelDebug

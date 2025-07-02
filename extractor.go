@@ -1,9 +1,13 @@
 package grab
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/hydrz/grab/utils"
 )
 
 // StreamType defines the type of media resource.
@@ -30,7 +34,7 @@ type Stream struct {
 	Quality  string            // Quality/bitrate info (e.g., "1080p", "320kbps")
 	Size     int64             // Size in bytes (if known)
 	Duration time.Duration     // Duration of the stream (if applicable)
-	Headers  http.Header       // Custom headers for this stream (optional)
+	Header   http.Header       // Custom headers for this stream (optional)
 	Extra    map[string]string // Extensible fields (e.g., codec info)
 	SaveAs   string            // Suggested filename to save this stream
 }
@@ -44,29 +48,74 @@ type Media struct {
 	Extra       map[string]string // Additional info for extensibility
 }
 
-type Extractor interface {
-	Name() string
-	CanExtract(url string) bool
-	Extract(url string, options Option) ([]Media, error)
+func (m *Media) String() string {
+	output := strings.Builder{}
+	output.WriteString(fmt.Sprintf("Title: %s\n", m.Title))
+	if m.Description != "" {
+		output.WriteString(fmt.Sprintf("Description: %s\n", m.Description))
+	}
+	if m.Thumbnail != "" {
+		output.WriteString(fmt.Sprintf("Thumbnail: %s\n", m.Thumbnail))
+	}
+	output.WriteString("Streams:\n")
+	if len(m.Streams) == 0 {
+		output.WriteString("  No streams available.\n")
+	} else {
+		for _, stream := range m.Streams {
+			output.WriteString(fmt.Sprintf("  [%s] %s\n", stream.ID, stream.Title))
+			if stream.Quality != "" {
+				output.WriteString(fmt.Sprintf("    Quality: %s\n", stream.Quality))
+			}
+			if stream.Type != "" {
+				output.WriteString(fmt.Sprintf("    Type: %s\n", stream.Type))
+			}
+			if stream.Format != "" {
+				output.WriteString(fmt.Sprintf("    Format: %s\n", stream.Format))
+			}
+			if stream.Size > 0 {
+				output.WriteString(fmt.Sprintf("    Size: %s\n", utils.FormatBytes(stream.Size)))
+			}
+			if stream.Duration > 0 {
+				output.WriteString(fmt.Sprintf("    Duration: %s\n", utils.FormatDuration(stream.Duration)))
+			}
+			if stream.URL != "" {
+				output.WriteString(fmt.Sprintf("    URL: %s\n", stream.URL))
+			}
+			if stream.SaveAs != "" {
+				output.WriteString(fmt.Sprintf("    Save As: %s\n", stream.SaveAs))
+			}
+			if len(stream.Extra) > 0 {
+				output.WriteString(fmt.Sprintf("    Extra: %v\n", stream.Extra))
+			}
+			output.WriteString("\n")
+		}
+	}
+	return output.String()
 }
 
-var extractors = make(map[string]Extractor)
+type ExtractorFactory func(ctx *Context) Extractor
+
+type Extractor interface {
+	CanExtract(url string) bool
+	Extract(url string) ([]Media, error)
+}
+
+var extractors = make(map[string]ExtractorFactory)
 var lock sync.RWMutex
 
-func Register(extractor Extractor) {
+func Register(name string, f ExtractorFactory) {
 	lock.Lock()
 	defer lock.Unlock()
-	if extractor == nil {
-		panic("grab: Register extractor is nil")
-	}
-	extractors[extractor.Name()] = extractor
+	extractors[name] = f
 }
 
-func FindExtractor(url string) (Extractor, error) {
+func FindExtractor(ctx *Context, url string) (Extractor, error) {
 	lock.RLock()
 	defer lock.RUnlock()
-	for _, extractor := range extractors {
+	for name, factory := range extractors {
+		extractor := factory(ctx)
 		if extractor.CanExtract(url) {
+			ctx.logger.Debug("Using extractor", "name", name, "url", url)
 			return extractor, nil
 		}
 	}

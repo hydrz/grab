@@ -2,11 +2,10 @@ package gaodun
 
 import (
 	"crypto/rand"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -19,6 +18,8 @@ const (
 	userAgent  = "GdClient/10.0.81 Android/14 H2OS/110_14.0.0.630(cn01) GdNetwork/1.0.5"
 	apiVersion = "264"
 )
+
+var ErrAbortWithResponse = errors.New("abort with response")
 
 // Api defines the interface for Gaodun API operations
 type Api interface {
@@ -50,210 +51,153 @@ type Api interface {
 }
 
 // NewApi creates a new API client with proper authentication headers
-func NewApi() Api {
+func NewApi(client *resty.Client) Api {
+	if client == nil {
+		client = resty.New()
+	}
+
+	client.SetBaseURL(endpoint)
+
 	token := os.Getenv("GAODUN_AUTH_TOKEN")
 	xRequestedExtend := fmt.Sprintf(
 		`{"apiConfigVersion":"%s","appStore":"%s","appVersion":"%s","phoneBrand":"%s","appScheme":"%s","deviceId":"%s","appChannel":"%s","appChannelName":"%s"}`,
 		apiVersion, "oppo", "264", "oneplus", "gaodunapp", generateDeviceID(), "oppo", "android",
 	)
+	client.SetHeader("User-Agent", userAgent)
+	client.SetHeader("Authentication", token)
+	client.SetHeader("ApiVersion", apiVersion)
+	client.SetHeader("X-Requested-Extend", xRequestedExtend)
+	client.SetHeader("Host", "apigateway.gaodun.com")
+	client.SetHeader("Connection", "Keep-Alive")
+	client.SetHeader("Accept-Encoding", "gzip")
 
-	headers := make(http.Header)
-	headers.Set("User-Agent", userAgent)
-	headers.Set("Authentication", token)
-	headers.Set("ApiVersion", apiVersion)
-	headers.Set("X-Requested-Extend", xRequestedExtend)
-	headers.Set("Host", "apigateway.gaodun.com")
-	headers.Set("Connection", "Keep-Alive")
-	headers.Set("Accept-Encoding", "gzip")
+	client.OnAfterResponse(func(c *resty.Client, r *resty.Response) error {
+		if r.StatusCode() != http.StatusOK {
+			return fmt.Errorf("API request failed with status %d: %s", r.StatusCode(), r.String())
+		}
+		return nil
+	})
 
 	return &api{
-		client:  resty.New(),
-		headers: headers,
+		client: client,
 	}
 }
 
 // api handles all API interactions with Gaodun services
 type api struct {
-	client  *resty.Client
-	headers http.Header
-}
-
-func (c *api) do(method, url string, body any, additionalHeaders ...map[string]string) ([]byte, error) {
-	headers := c.headers.Clone()
-
-	// Merge additional headers if provided
-	if len(additionalHeaders) > 0 {
-		for k, v := range additionalHeaders[0] {
-			headers.Set(k, v)
-		}
-	}
-
-	req := c.client.R()
-	req.Header = headers
-	req.SetBody(body)
-	resp, err := req.Execute(method, url)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-
-	if strings.Contains(resp.String(), "登录超时") {
-		return nil, fmt.Errorf("login timeout, please check your authentication token")
-	}
-
-	return resp.Body(), nil
+	client *resty.Client
 }
 
 // GStudy retrieves syllabus information for g-study courses
 func (c *api) GStudy(courseID string) ([]Gradation, error) {
-	url := fmt.Sprintf("%s/g-study/api/v1/front/course/%s/gradation/syllabus", endpoint, courseID)
+	url := fmt.Sprintf("/g-study/api/v1/front/course/%s/gradation/syllabus", courseID)
 
-	resp, err := c.do("GET", url, nil)
+	var resp apiResponse[[]Gradation]
+
+	_, err := c.client.R().
+		SetResult(&resp).
+		Get(url)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get glive syllabus: %w", err)
+		return nil, fmt.Errorf("failed to get g-study syllabus: %w", err)
 	}
 
-	var apiResp apiResponse[[]Gradation]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse glive syllabus response: %w", err)
-	}
-
-	if apiResp.Status != 0 {
-		return nil, fmt.Errorf("API error: %s", apiResp.Message)
-	}
-
-	return apiResp.Result, nil
+	return resp.Result, nil
 }
 
 // GStudySyllabus retrieves detailed syllabus for glive courses
 func (c *api) GStudySyllabus(courseID, syllabusID string) (*Syllabus, error) {
-	url := fmt.Sprintf("%s/g-study/api/v1/front/course/%s/syllabus/glive/%s", endpoint, courseID, syllabusID)
+	url := fmt.Sprintf("/g-study/api/v1/front/course/%s/syllabus/glive/%s", courseID, syllabusID)
 
-	resp, err := c.do("GET", url, nil)
+	var resp apiResponse[Syllabus]
+
+	_, err := c.client.R().
+		SetResult(&resp).
+		Get(url)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get glive syllabus: %w", err)
+		return nil, fmt.Errorf("failed to get g-study syllabus: %w", err)
 	}
 
-	var apiResp apiResponse[Syllabus]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse glive syllabus response: %w", err)
-	}
-
-	if apiResp.Status != 0 {
-		return nil, fmt.Errorf("API error: %s", apiResp.Message)
-	}
-
-	return &apiResp.Result, nil
+	return &resp.Result, nil
 }
 
 // EpStudy retrieves gradation for ep-study courses
 func (c *api) EpStudy(courseID string) ([]Gradation, error) {
-	url := fmt.Sprintf("%s/ep-study/front/course/%s/gradation", endpoint, courseID)
+	url := fmt.Sprintf("/ep-study/front/course/%s/gradation", courseID)
 
-	resp, err := c.do("GET", url, nil)
+	var resp apiResponse[[]Gradation]
+	_, err := c.client.R().
+		SetResult(&resp).
+		Get(url)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get glive syllabus: %w", err)
+		return nil, fmt.Errorf("failed to get ep-study gradation: %w", err)
 	}
 
-	var apiResp apiResponse[[]Gradation]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse ep gradation response: %w", err)
-	}
-
-	if apiResp.Status != 0 {
-		return nil, fmt.Errorf("API error: %s", apiResp.Message)
-	}
-
-	return apiResp.Result, nil
+	return resp.Result, nil
 }
 
 // EpStudySyllabus retrieves detailed syllabus for ep-study courses
 func (c *api) EpStudySyllabus(courseID, syllabusID string) ([]Syllabus, error) {
-	url := fmt.Sprintf("%s/ep-study/front/course/%s/syllabus/%s?show_own_teacher=true", endpoint, courseID, syllabusID)
+	url := fmt.Sprintf("/ep-study/front/course/%s/syllabus/%s?show_own_teacher=true", courseID, syllabusID)
 
-	resp, err := c.do("GET", url, nil)
+	var res apiResponse[struct {
+		Item []Syllabus `json:"items"`
+	}]
+
+	_, err := c.client.R().
+		SetResult(&res).
+		Get(url)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get glive syllabus: %w", err)
+		return nil, fmt.Errorf("failed to get ep-study syllabus: %w", err)
 	}
 
-	var apiResp apiResponse[map[string]interface{}]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse ep syllabus response: %w", err)
-	}
-
-	if apiResp.Status != 0 {
-		return nil, fmt.Errorf("API error: %s", apiResp.Message)
-	}
-
-	// The ep syllabus has a different structure with "items" field
-	items, ok := apiResp.Result["items"]
-	if !ok {
-		return nil, fmt.Errorf("no items found in ep syllabus response")
-	}
-
-	// Convert to our SyllabusResponse structure
-	itemsBytes, err := json.Marshal(items)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal items: %w", err)
-	}
-
-	var syllabusItems []Syllabus
-	if err := json.Unmarshal(itemsBytes, &syllabusItems); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal syllabus items: %w", err)
-	}
-
-	return syllabusItems, nil
+	return res.Result.Item, nil
 }
 
 // VideoResource retrieves video stream information
-func (c *api) VideoResource(code, res string, channel int) (*VideoResource, error) {
-	url := fmt.Sprintf("%s/glive2-vod/api/v1/live/resource?code=%s&res=%s&channel=%d", endpoint, code, res, channel)
-	resp, err := c.do("GET", url, nil, map[string]string{
-		"isLiveVodAuthenticate": "true",
-	})
+func (c *api) VideoResource(code, quality string, channel int) (*VideoResource, error) {
+	url := fmt.Sprintf("/glive2-vod/api/v1/live/resource?code=%s&res=%s&channel=%d", code, quality, channel)
+
+	var res apiResponse[VideoResource]
+
+	_, err := c.client.R().
+		SetHeader("isLiveVodAuthenticate", "true").
+		SetResult(&res).
+		Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get glive syllabus: %w", err)
+		return nil, fmt.Errorf("failed to get video resource: %w", err)
 	}
 
-	var apiResp apiResponse[VideoResource]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse video resource response: %w", err)
-	}
-
-	if apiResp.Status != 200 {
-		return nil, fmt.Errorf("API error: %s", apiResp.Message)
-	}
-
-	return &apiResp.Result, nil
+	return &res.Result, nil
 }
 
 func (c *api) GLiveCheck(roomId, token string) (string, error) {
-	url := fmt.Sprintf("%s/glive2-vod/api/v1/vod/check?roomId=%s&token=%s", endpoint, roomId, token)
-
-	resp, err := c.do("GET", url, nil, map[string]string{
-		"isLiveVodAuthenticate": "true",
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to check glive vod: %w", err)
-	}
+	url := fmt.Sprintf("/glive2-vod/api/v1/vod/check?roomId=%s&token=%s", roomId, token)
 
 	type result struct {
 		Code string `json:"code"`
 	}
 
-	var apiResp apiResponse[result]
-	if err := json.Unmarshal(resp, &apiResp); err != nil {
-		return "", fmt.Errorf("failed to parse glive check response: %w", err)
+	var res apiResponse[result]
+
+	_, err := c.client.R().
+		SetHeader("isLiveVodAuthenticate", "true").
+		SetResult(&res).
+		Get(url)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to check glive vod: %w", err)
 	}
-	if apiResp.Status != 200 {
-		return "", fmt.Errorf("API error: %s", apiResp.Message)
-	}
-	return apiResp.Result.Code, nil
+
+	return res.Result.Code, nil
 }
 
 // Headers returns the headers used for API requests
 func (c *api) Headers() http.Header {
-	return c.headers.Clone()
+	return c.client.Header.Clone()
 }
 
 // generateDeviceID generates a random device ID for API requests

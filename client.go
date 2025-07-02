@@ -1,11 +1,16 @@
 package grab
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/go-resty/resty/v2"
+	"github.com/gregjones/httpcache"
+	"github.com/gregjones/httpcache/diskcache"
 	"github.com/hydrz/grab/utils"
 )
 
-func (o *Option) Client() *resty.Client {
+func NewClient(o Option) *resty.Client {
 	client := resty.New()
 
 	if o.Timeout > 0 {
@@ -38,6 +43,13 @@ func (o *Option) Client() *resty.Client {
 
 	if o.Debug {
 		client.SetDebug(true)
+	}
+
+	if !o.NoCache {
+		cachePath := filepath.Join(os.TempDir(), "grab_cache")
+		cache := diskcache.New(cachePath)
+		transport := httpcache.NewTransport(cache)
+		client.SetTransport(transport)
 	}
 
 	return client

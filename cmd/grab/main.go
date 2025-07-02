@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/schollz/progressbar/v3"
@@ -19,22 +20,50 @@ import (
 
 var option grab.Option
 
-func main() {
-	// Handle graceful shutdown
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	option.Ctx = ctx
+func init() {
+	// Set default values for options
+	option = *grab.DefaultOptions
+}
 
-	rootCmd := createRootCommand()
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+// ProgressManager manages multiple progress bars
+type ProgressManager struct {
+	bars map[string]*progressbar.ProgressBar
+	mu   sync.RWMutex
+}
+
+func NewProgressManager() *ProgressManager {
+	return &ProgressManager{
+		bars: make(map[string]*progressbar.ProgressBar),
 	}
+}
+
+func (pm *ProgressManager) createProgressCallback() grab.ProgressCallback {
+	return func(current, total int64, description string) {
+		pm.mu.Lock()
+		defer pm.mu.Unlock()
+
+		bar, exists := pm.bars[description]
+		if !exists {
+			bar = progressbar.DefaultBytes(total, description)
+			pm.bars[description] = bar
+		}
+		bar.Set64(current)
+	}
+}
+
+func (pm *ProgressManager) finish() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	for _, bar := range pm.bars {
+		bar.Finish()
+	}
+	pm.bars = make(map[string]*progressbar.ProgressBar)
 }
 
 // createRootCommand creates the main command.
 func createRootCommand() *cobra.Command {
 	var headerFlags []string
-
 	cmd := &cobra.Command{
 		Use:     "grab [URL...]",
 		Short:   "A versatile media downloader",
@@ -45,13 +74,75 @@ func createRootCommand() *cobra.Command {
 			if err := processHeaders(headerFlags); err != nil {
 				return err
 			}
-			downloader := grab.NewDownloader(option)
-			return processURLsWithProgress(downloader, args)
+			return runRootCommand(cmd, args)
 		},
 	}
-
 	setupFlags(cmd, &headerFlags)
 	return cmd
+}
+
+// runRootCommand executes the grab command with the provided context and URLs.
+func runRootCommand(cmd *cobra.Command, urls []string) error {
+	ctx := grab.NewContext(cmd.Context(), option)
+
+	// Setup progress manager if not in silent mode
+	var progressManager *ProgressManager
+	if !ctx.Option().Silent {
+		progressManager = NewProgressManager()
+		ctx.SetProgressCallback(progressManager.createProgressCallback())
+		defer progressManager.finish()
+	}
+
+	for _, url := range urls {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		extractor, err := grab.FindExtractor(ctx, url)
+		if err != nil {
+			return fmt.Errorf("failed to find extractor for URL %s: %w", url, err)
+		}
+
+		medias, err := extractor.Extract(url)
+		if err != nil {
+			return fmt.Errorf("failed to extract media from URL %s: %w", url, err)
+		}
+
+		if ctx.Option().ExtractOnly {
+			if len(medias) == 0 {
+				fmt.Printf("No media found for URL: %s\n", url)
+				continue
+			}
+			fmt.Println("Media information:")
+			for _, media := range medias {
+				fmt.Println(media.String())
+			}
+			return nil
+		}
+
+		downloader := grab.NewDownloader(ctx)
+
+		if err := downloader.Download(medias); err != nil {
+			return fmt.Errorf("failed to download media for URL %s: %w", url, err)
+		}
+	}
+
+	return nil
+}
+
+// processHeaders parses and validates HTTP headers from command line flags.
+func processHeaders(headerFlags []string) error {
+	if option.Headers == nil {
+		option.Headers = make(http.Header)
+	}
+	for _, h := range headerFlags {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid header format: %s", h)
+		}
+		option.Headers.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+	}
+	return nil
 }
 
 // setupFlags configures command line flags using the current values in option as defaults.
@@ -69,6 +160,7 @@ func setupFlags(cmd *cobra.Command, headerFlags *[]string) {
 	cmd.Flags().StringVarP(&option.Proxy, "proxy", "x", option.Proxy, "HTTP proxy URL")
 	cmd.Flags().IntVarP(&option.RetryCount, "retry", "r", option.RetryCount, "Number of retry attempts")
 	cmd.Flags().DurationVarP(&option.Timeout, "timeout", "t", option.Timeout, "Request timeout")
+	cmd.Flags().BoolVar(&option.NoCache, "no-cache", option.NoCache, "Disable HTTP caching")
 	// Download options
 	cmd.Flags().IntVarP(&option.Threads, "threads", "n", option.Threads, "Number of concurrent download threads")
 	cmd.Flags().Int64Var(&option.ChunkSize, "chunk-size", option.ChunkSize, "Download chunk size in bytes")
@@ -89,81 +181,13 @@ func setupFlags(cmd *cobra.Command, headerFlags *[]string) {
 	cmd.Flags().BoolVar(&option.Silent, "silent", option.Silent, "Suppress all output except errors")
 }
 
-// processHeaders parses and validates HTTP headers from command line flags.
-func processHeaders(headerFlags []string) error {
-	if option.Headers == nil {
-		option.Headers = make(http.Header)
+func main() {
+	// Handle graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	rootCmd := createRootCommand()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		os.Exit(1)
 	}
-	for _, h := range headerFlags {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid header format: %s", h)
-		}
-		option.Headers.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-	}
-	return nil
-}
-
-// processURLsWithProgress handles downloading from multiple URLs and manages progress bar display.
-func processURLsWithProgress(downloader *grab.Downloader, urls []string) error {
-	var lastError error
-	successCount := 0
-
-	var bar *progressbar.ProgressBar
-	downloader.ProgressCallback = func(current, total int) {
-		if bar == nil && total > 0 && !option.Silent {
-			bar = progressbar.NewOptions(
-				total,
-				progressbar.OptionSetDescription("downloading"),
-				progressbar.OptionSetWriter(os.Stdout),
-				progressbar.OptionSetWidth(40),
-				progressbar.OptionSetTheme(progressbar.Theme{Saucer: "#", SaucerHead: ">", SaucerPadding: "-", BarStart: "[", BarEnd: "]"}),
-				progressbar.OptionSetRenderBlankState(true),
-				progressbar.OptionSetPredictTime(true),
-				progressbar.OptionSetElapsedTime(true),
-				progressbar.OptionShowBytes(true),
-			)
-		}
-		if bar != nil {
-			bar.Set(current)
-		}
-	}
-
-	for i, url := range urls {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			continue
-		}
-
-		if !option.Silent {
-			fmt.Printf("Processing (%d/%d): %s\n", i+1, len(urls), url)
-		}
-
-		bar = nil // Reset progress bar for each URL
-
-		err := downloader.Download(url)
-		if bar != nil {
-			bar.Finish()
-		}
-		if err != nil {
-			lastError = err
-			if option.IgnoreErrors {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				continue
-			}
-			return err
-		}
-
-		successCount++
-	}
-
-	if len(urls) > 1 && !option.Silent {
-		fmt.Printf("Summary: %d/%d URLs processed successfully\n", successCount, len(urls))
-	}
-
-	if successCount == 0 && lastError != nil {
-		return lastError
-	}
-
-	return nil
 }

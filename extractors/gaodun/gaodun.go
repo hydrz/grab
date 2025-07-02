@@ -2,7 +2,6 @@ package gaodun
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -16,13 +15,18 @@ import (
 )
 
 func init() {
-	grab.Register(&extractor{api: NewApi()})
+	grab.Register("gaodun", func(ctx *grab.Context) grab.Extractor {
+		return &extractor{
+			ctx: ctx,
+			api: NewApi(ctx.Client()),
+		}
+	})
 }
 
 // extractor implements the grab.Extractor interface for Gaodun.
 type extractor struct {
-	api    Api
-	logger *slog.Logger
+	ctx *grab.Context
+	api Api
 }
 
 // Name returns the extractor name.
@@ -42,10 +46,22 @@ func (e *extractor) CanExtract(url string) bool {
 	return false
 }
 
+// extractCourseID extracts course ID from the URL.
+func extractCourseID(url string) (string, error) {
+	if matches := regexp.MustCompile(`(?:course_id|courseId)=(\d+)`).FindStringSubmatch(url); len(matches) >= 2 {
+		return matches[1], nil
+	}
+	if matches := regexp.MustCompile(`/course/(\d+)`).FindStringSubmatch(url); len(matches) >= 2 {
+		return matches[1], nil
+	}
+	return "", fmt.Errorf("course ID not found in URL")
+}
+
 // Extract retrieves all media from a Gaodun course URL.
-func (e *extractor) Extract(url string, option grab.Option) ([]grab.Media, error) {
-	e.logger = option.Logger()
-	courseID, err := e.extractCourseID(url)
+func (e *extractor) Extract(url string) ([]grab.Media, error) {
+	e.api = NewApi(e.ctx.Client())
+
+	courseID, err := extractCourseID(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract course ID: %w", err)
 	}
@@ -54,20 +70,9 @@ func (e *extractor) Extract(url string, option grab.Option) ([]grab.Media, error
 		return nil, fmt.Errorf("failed to determine course type: %w", err)
 	}
 	if isGStudy {
-		return e.extractGStudyCourse(courseID, option)
+		return e.extractGStudyCourse(courseID)
 	}
-	return e.extractEpStudyCourse(courseID, option)
-}
-
-// extractCourseID extracts course ID from the URL.
-func (e *extractor) extractCourseID(url string) (string, error) {
-	if matches := regexp.MustCompile(`(?:course_id|courseId)=(\d+)`).FindStringSubmatch(url); len(matches) >= 2 {
-		return matches[1], nil
-	}
-	if matches := regexp.MustCompile(`/course/(\d+)`).FindStringSubmatch(url); len(matches) >= 2 {
-		return matches[1], nil
-	}
-	return "", fmt.Errorf("course ID not found in URL")
+	return e.extractEpStudyCourse(courseID)
 }
 
 // isGStudyCourse returns true if the course is a G-Study course.
@@ -84,7 +89,7 @@ func (e *extractor) isGStudyCourse(courseID string) (bool, error) {
 }
 
 // extractGStudyCourse retrieves all media from a G-Study course.
-func (e *extractor) extractGStudyCourse(courseID string, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractGStudyCourse(courseID string) ([]grab.Media, error) {
 	gradations, err := e.api.GStudy(courseID)
 	if err != nil {
 		return nil, err
@@ -95,23 +100,23 @@ func (e *extractor) extractGStudyCourse(courseID string, option grab.Option) ([]
 		}
 		syllabus, err := e.api.GStudySyllabus(courseID, grad.SyllabusID.String())
 		if err != nil || syllabus == nil {
-			e.logger.Error("failed to get G-Study syllabus",
+			e.ctx.Logger().Error("failed to get G-Study syllabus",
 				"course_id", courseID,
 				"gradation_name", grad.Name,
 				"error", err,
 			)
 			return nil, nil
 		}
-		return e.extractGStudySyllabus(courseID, grad.Name, *syllabus, option)
+		return e.extractGStudySyllabus(courseID, grad.Name, *syllabus)
 	})
 }
 
 // extractGStudySyllabus recursively retrieves all resources from a G-Study syllabus node.
-func (e *extractor) extractGStudySyllabus(courseID, gradationName string, syllabus Syllabus, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractGStudySyllabus(courseID, gradationName string, syllabus Syllabus) ([]grab.Media, error) {
 	var allMedia []grab.Media
 	if len(syllabus.Children) > 0 {
 		childrenMedia, _ := e.processSyllabusChildrenConcurrently(syllabus.Children, func(child Syllabus) ([]grab.Media, error) {
-			return e.extractGStudySyllabus(courseID, gradationName, child, option)
+			return e.extractGStudySyllabus(courseID, gradationName, child)
 		})
 		allMedia = append(allMedia, childrenMedia...)
 	}
@@ -123,9 +128,9 @@ func (e *extractor) extractGStudySyllabus(courseID, gradationName string, syllab
 	)
 	if len(allResources) > 0 {
 		baseDir := e.buildResourcePath(courseID, gradationName, syllabus.Name)
-		resourceMedia, err := e.extractResources(allResources, baseDir, option)
+		resourceMedia, err := e.extractResources(allResources, baseDir)
 		if err != nil {
-			e.logger.Error("failed to extract resources",
+			e.ctx.Logger().Error("failed to extract resources",
 				"course_id", courseID,
 				"gradation_name", gradationName,
 				"syllabus_name", syllabus.Name,
@@ -139,22 +144,22 @@ func (e *extractor) extractGStudySyllabus(courseID, gradationName string, syllab
 }
 
 // extractEpStudyCourse retrieves all media from an Ep-Study course.
-func (e *extractor) extractEpStudyCourse(courseID string, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractEpStudyCourse(courseID string) ([]grab.Media, error) {
 	gradations, err := e.api.EpStudy(courseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get EP-Study gradations: %w", err)
 	}
 	return processGradationsConcurrently(gradations, func(grad Gradation) ([]grab.Media, error) {
-		return e.processEpGradation(courseID, grad, option)
+		return e.processEpGradation(courseID, grad)
 	})
 }
 
 // processEpGradation recursively processes an Ep-Study gradation node.
-func (e *extractor) processEpGradation(courseID string, grad Gradation, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) processEpGradation(courseID string, grad Gradation) ([]grab.Media, error) {
 	var allMedia []grab.Media
 	if len(grad.Children) > 0 {
 		childrenMedia, _ := processGradationsConcurrently(grad.Children, func(child Gradation) ([]grab.Media, error) {
-			return e.processEpGradation(courseID, child, option)
+			return e.processEpGradation(courseID, child)
 		})
 		allMedia = append(allMedia, childrenMedia...)
 	}
@@ -164,7 +169,7 @@ func (e *extractor) processEpGradation(courseID string, grad Gradation, option g
 			return nil, fmt.Errorf("failed to get EP-Study syllabus for gradation %s (syllabus_id: %s): %w",
 				grad.Name, grad.SyllabusID.String(), err)
 		}
-		media, err := e.extractEpStudySyllabus(courseID, grad.Name, syllabusItems, option)
+		media, err := e.extractEpStudySyllabus(courseID, grad.Name, syllabusItems)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract EP-Study syllabus items for gradation %s: %w",
 				grad.Name, err)
@@ -175,18 +180,18 @@ func (e *extractor) processEpGradation(courseID string, grad Gradation, option g
 }
 
 // extractEpStudySyllabus retrieves all resources from Ep-Study syllabus items.
-func (e *extractor) extractEpStudySyllabus(courseID, gradationName string, syllabusItems []Syllabus, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractEpStudySyllabus(courseID, gradationName string, syllabusItems []Syllabus) ([]grab.Media, error) {
 	return e.processSyllabusChildrenConcurrently(syllabusItems, func(item Syllabus) ([]grab.Media, error) {
-		return e.extractEpSyllabusItem(courseID, gradationName, item, option)
+		return e.extractEpSyllabusItem(courseID, gradationName, item)
 	})
 }
 
 // extractEpSyllabusItem recursively processes an Ep-Study syllabus item and its children.
-func (e *extractor) extractEpSyllabusItem(courseID, gradationName string, item Syllabus, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractEpSyllabusItem(courseID, gradationName string, item Syllabus) ([]grab.Media, error) {
 	var allMedia []grab.Media
 	if len(item.Children) > 0 {
 		childrenMedia, _ := e.processSyllabusChildrenConcurrently(item.Children, func(child Syllabus) ([]grab.Media, error) {
-			return e.extractEpSyllabusItem(courseID, gradationName, child, option)
+			return e.extractEpSyllabusItem(courseID, gradationName, child)
 		})
 		allMedia = append(allMedia, childrenMedia...)
 	}
@@ -207,13 +212,13 @@ func (e *extractor) extractEpSyllabusItem(courseID, gradationName string, item S
 			}
 		}
 		if resourceToProcess.ID != 0 {
-			media, err := e.processResource(resourceToProcess, itemDir, option)
+			media, err := e.processResource(resourceToProcess, itemDir)
 			if err != nil {
 				return allMedia, fmt.Errorf("failed to process EP-Study resource (ID: %d, title: %s): %w",
 					resourceToProcess.ID, resourceToProcess.Title, err)
 			}
 			if media == nil {
-				e.logger.Debug("skipping EP-Study resource with no media",
+				e.ctx.Logger().Debug("skipping EP-Study resource with no media",
 					"resource_id", resourceToProcess.ID,
 					"title", resourceToProcess.Title,
 				)
@@ -226,18 +231,18 @@ func (e *extractor) extractEpSyllabusItem(courseID, gradationName string, item S
 }
 
 // extractResources processes a list of resources and creates Media objects.
-func (e *extractor) extractResources(resources []Resource, baseDir string, option grab.Option) ([]grab.Media, error) {
+func (e *extractor) extractResources(resources []Resource, baseDir string) ([]grab.Media, error) {
 	return e.processResourcesConcurrently(resources, func(res Resource) (*grab.Media, error) {
-		return e.processResource(res, baseDir, option)
+		return e.processResource(res, baseDir)
 	})
 }
 
 // processResource creates a Media object from a Resource, handling different types.
-func (e *extractor) processResource(resource Resource, baseDir string, option grab.Option) (*grab.Media, error) {
+func (e *extractor) processResource(resource Resource, baseDir string) (*grab.Media, error) {
 	switch resource.Discriminator {
 	case "live_new":
 		if resource.LiveUrlPlayBackApp == "" {
-			e.logger.Debug("skipping live resource without playback URL",
+			e.ctx.Logger().Debug("skipping live resource without playback URL",
 				"resource_id", resource.ID,
 				"title", resource.Title,
 			)
@@ -245,7 +250,7 @@ func (e *extractor) processResource(resource Resource, baseDir string, option gr
 		}
 		roomID, token, err := e.extractRoomIDAndToken(resource.LiveUrlPlayBackApp)
 		if err != nil {
-			e.logger.Error("failed to extract room ID and token",
+			e.ctx.Logger().Error("failed to extract room ID and token",
 				"resource_id", resource.ID,
 				"error", err,
 			)
@@ -253,7 +258,7 @@ func (e *extractor) processResource(resource Resource, baseDir string, option gr
 		}
 		code, err := e.api.GLiveCheck(roomID, token)
 		if err != nil {
-			e.logger.Error("failed to check GLive",
+			e.ctx.Logger().Error("failed to check GLive",
 				"room_id", roomID,
 				"token", token,
 				"error", err,
@@ -261,11 +266,11 @@ func (e *extractor) processResource(resource Resource, baseDir string, option gr
 			return nil, nil
 		}
 		resource.VideoID = code
-		return e.processVideoResource(resource, baseDir, option)
+		return e.processVideoResource(resource, baseDir)
 	case "video":
-		return e.processVideoResource(resource, baseDir, option)
+		return e.processVideoResource(resource, baseDir)
 	case "lecture_note":
-		return e.processNonVideoResource(resource, baseDir, option)
+		return e.processNonVideoResource(resource, baseDir)
 	}
 	return nil, nil
 }
@@ -281,7 +286,7 @@ func (e *extractor) extractRoomIDAndToken(url string) (roomID, token string, err
 }
 
 // processVideoResource creates a Media object for a video resource.
-func (e *extractor) processVideoResource(resource Resource, baseDir string, _ grab.Option) (*grab.Media, error) {
+func (e *extractor) processVideoResource(resource Resource, baseDir string) (*grab.Media, error) {
 	sourceID := resource.VideoID
 	videoRes, err := e.api.VideoResource(sourceID, "SD", 0)
 	if err != nil {
@@ -295,10 +300,6 @@ func (e *extractor) processVideoResource(resource Resource, baseDir string, _ gr
 		}
 		id := resource.VideoID + "_" + quality
 
-		headers := make(http.Header)
-		headers.Set("isLiveVodAuthenticate", "true")
-		headers.Set("Authentication", e.api.Headers().Get("Authentication"))
-
 		stream := grab.Stream{
 			ID:       id,
 			Title:    resource.Title,
@@ -309,7 +310,7 @@ func (e *extractor) processVideoResource(resource Resource, baseDir string, _ gr
 			Size:     int64(qualityInfo.FileSize * 1024),
 			Duration: time.Duration(resource.Duration) * time.Second,
 			SaveAs:   filepath.Join(baseDir, fmt.Sprintf("%s_%s.mp4", utils.SanitizeFilename(resource.Title), quality)),
-			Headers:  headers,
+			Header:   resourceHeaders(qualityInfo.Path),
 		}
 		streams = append(streams, stream)
 	}
@@ -323,7 +324,7 @@ func (e *extractor) processVideoResource(resource Resource, baseDir string, _ gr
 }
 
 // processNonVideoResource creates a Media object for a non-video resource (e.g., PDF).
-func (e *extractor) processNonVideoResource(res Resource, baseDir string, _ grab.Option) (*grab.Media, error) {
+func (e *extractor) processNonVideoResource(res Resource, baseDir string) (*grab.Media, error) {
 	if res.Path == "" {
 		return nil, nil
 	}
@@ -356,12 +357,21 @@ func (e *extractor) processNonVideoResource(res Resource, baseDir string, _ grab
 		Quality: "best",
 		Size:    size,
 		SaveAs:  filepath.Join(baseDir, fmt.Sprintf("%s.%s", filename, ext)),
-		Headers: e.api.Headers(),
+		Header:  resourceHeaders(res.Path),
 	}}
 	return &grab.Media{
 		Title:   res.Title,
 		Streams: streams,
 	}, nil
+}
+
+func resourceHeaders(url string) http.Header {
+	headers := make(http.Header)
+	headers.Set("Referer", "https://glive2.gaodun.com")
+	headers.Set("User-Agent", "GdClient/10.0.82 Android/14 H2OS/110_14.0.0.630(cn01) Player/2.3.0 EXO/2.12.0")
+	headers.Set("Host", utils.ExtractDomain(url))
+	headers.Set("Connection", "Keep-Alive")
+	return headers
 }
 
 // buildResourcePath returns a consistent directory path for resources.
@@ -370,9 +380,6 @@ func (e *extractor) buildResourcePath(courseID, gradationName, _ string) string 
 	if gradationName != "" {
 		parts = append(parts, utils.SanitizeFilename(gradationName))
 	}
-	// if syllabusName != "" {
-	// 	parts = append(parts, utils.SanitizeFilename(syllabusName))
-	// }
 	return filepath.Join(parts...)
 }
 

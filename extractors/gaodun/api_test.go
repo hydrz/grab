@@ -6,9 +6,9 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	t.Skip("Skipping test for now, as it requires network access")
+	// t.Skip("Skipping test for now, as it requires network access")
 
-	api := NewApi()
+	api := NewApi(nil)
 	gStudyGradations, err := api.GStudy("33795")
 	if err != nil {
 		t.Fatalf("error: %v", err)
