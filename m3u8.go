@@ -284,10 +284,6 @@ func (r *m3U8Reader) fetchSegmentData(segment *segmentInfo) ([]byte, error) {
 		req.Header = segment.Headers.Clone()
 	}
 
-	// Disable caching for segment downloads to avoid cache size limits
-	req.SetHeader("Cache-Control", "no-cache")
-	req.SetHeader("Pragma", "no-cache")
-
 	resp, err := req.Get(segment.URI)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -297,7 +293,6 @@ func (r *m3U8Reader) fetchSegmentData(segment *segmentInfo) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP error: %s", resp.Status())
 	}
 
-	// Don't use buffer pool for the actual data storage
 	data, err := io.ReadAll(resp.RawBody())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read segment data: %w", err)
@@ -501,10 +496,6 @@ func (r *m3U8Reader) downloadSegment(segmentURL, outputPath string, headers http
 	if headers != nil {
 		req.Header = headers.Clone()
 	}
-
-	// Disable caching for segment downloads to avoid cache size limits
-	req.SetHeader("Cache-Control", "no-cache")
-	req.SetHeader("Pragma", "no-cache")
 
 	resp, err := req.Get(segmentURL)
 	if err != nil {
