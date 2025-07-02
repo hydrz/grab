@@ -3,6 +3,7 @@ package grab
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -12,6 +13,7 @@ import (
 )
 
 // newClient creates a configured resty client with robust error handling and caching.
+// newClient creates a configured resty client with robust error handling, caching, and advanced authentication.
 func newClient(o Option) *resty.Client {
 	client := resty.New()
 
@@ -25,6 +27,21 @@ func newClient(o Option) *resty.Client {
 	// Set proxy if configured
 	if o.Proxy != "" {
 		client.SetProxy(o.Proxy)
+	}
+
+	// Authentication setup
+	if o.AuthUser != "" && o.AuthPass != "" {
+		client.SetBasicAuth(o.AuthUser, o.AuthPass)
+	}
+	if o.AuthToken != "" {
+		client.SetAuthToken(o.AuthToken)
+	}
+	if o.AuthHeader != "" {
+		// Format: "Key: Value"
+		parts := strings.SplitN(o.AuthHeader, ":", 2)
+		if len(parts) == 2 {
+			client.SetHeader(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
 	}
 
 	// Load cookies from file if specified

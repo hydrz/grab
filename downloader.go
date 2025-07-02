@@ -251,88 +251,51 @@ func (d *Downloader) downloadStream(ctx context.Context, stream Stream) error {
 }
 
 // downloadSingleThread performs single-threaded download with resume capability
+// downloadSingleThread performs single-threaded or multi-threaded (if supported) download with resume capability
 func (d *Downloader) downloadSingleThread(ctx context.Context, stream Stream, tempPath string) error {
-	var resumeOffset int64
-
-	// Check for existing partial file
-	if fi, err := os.Stat(tempPath); err == nil {
-		resumeOffset = fi.Size()
-		d.ctx.logger.Debug("Found existing file, attempting resume", "path", tempPath, "offset", resumeOffset)
-	}
-
+	// Step 1: Probe server for Range support and file size
 	req := d.ctx.client.R().
 		SetContext(ctx).
 		SetDoNotParseResponse(true)
 	req.Header = stream.Header.Clone()
-
-	// Set range header for resume if needed and file exists
-	if resumeOffset > 0 {
-		req.SetHeader("Range", fmt.Sprintf("bytes=%d-", resumeOffset))
-	}
-
+	req.SetHeader("Range", "bytes=0-0")
 	resp, err := req.Get(stream.URL)
 	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
+		return fmt.Errorf("failed to probe server: %w", err)
 	}
 	defer resp.RawBody().Close()
 
-	// Handle different response codes
-	switch resp.StatusCode() {
-	case http.StatusOK:
-		// Server doesn't support range or full file requested
-		if resumeOffset > 0 {
-			d.ctx.logger.Debug("Server returned full file instead of range, restarting download")
-			resumeOffset = 0
-		}
-	case http.StatusPartialContent:
-		// Range request successful
-		if resumeOffset == 0 {
-			d.ctx.logger.Warn("Unexpected partial content response without range request")
-		}
-	case http.StatusRequestedRangeNotSatisfiable:
-		// Range not satisfiable - file might be complete or corrupted
-		if resumeOffset > 0 {
-			d.ctx.logger.Debug("Range not satisfiable, checking if file is complete")
-			// Check if file is already complete
-			if contentRange := resp.Header().Get("Content-Range"); contentRange != "" {
-				if parts := strings.Split(contentRange, "/"); len(parts) == 2 {
-					if totalSize, err := strconv.ParseInt(parts[1], 10, 64); err == nil && resumeOffset >= totalSize {
-						d.ctx.logger.Info("File already complete", "path", tempPath)
-						return nil
-					}
+	supportRange := false
+	var totalSize int64 = stream.Size
+	if resp.StatusCode() == http.StatusPartialContent {
+		supportRange = true
+		if cr := resp.Header().Get("Content-Range"); cr != "" {
+			if parts := strings.Split(cr, "/"); len(parts) == 2 {
+				if sz, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					totalSize = sz
 				}
 			}
-			// Try downloading without range
-			return d.downloadSingleThreadNoRange(ctx, stream)
 		}
-		return fmt.Errorf("HTTP error: %s", resp.Status())
-	default:
-		return fmt.Errorf("HTTP error: %s", resp.Status())
-	}
-
-	// Open output file for writing
-	var file *os.File
-	if resumeOffset > 0 && resp.StatusCode() == http.StatusPartialContent {
-		file, err = os.OpenFile(tempPath, os.O_WRONLY|os.O_APPEND, 0644)
-	} else {
-		file, err = os.Create(tempPath)
-		resumeOffset = 0
-	}
-	if err != nil {
-		return fmt.Errorf("failed to open output file: %w", err)
-	}
-	defer file.Close()
-
-	// Get total size for progress tracking
-	var totalSize int64 = stream.Size
-	if contentLength := resp.Header().Get("Content-Length"); contentLength != "" {
-		if size, err := strconv.ParseInt(contentLength, 10, 64); err == nil {
-			if resp.StatusCode() == http.StatusPartialContent {
-				totalSize = size + resumeOffset
-			} else {
-				totalSize = size
+	} else if resp.StatusCode() == http.StatusOK {
+		if cl := resp.Header().Get("Content-Length"); cl != "" {
+			if sz, err := strconv.ParseInt(cl, 10, 64); err == nil {
+				totalSize = sz
 			}
 		}
+	} else {
+		return fmt.Errorf("HTTP error: %s", resp.Status())
+	}
+
+	// Step 2: If not support range or Threads <= 1, fallback to original single-thread logic
+	if !supportRange || d.ctx.option.Threads <= 1 || totalSize <= 0 {
+		return d.downloadSingleThreadNoRange(ctx, stream)
+	}
+
+	// Step 3: Multi-threaded download
+	threads := d.ctx.option.Threads
+	chunkSize := totalSize / int64(threads)
+	if chunkSize < 1 {
+		chunkSize = totalSize
 	}
 
 	// Progress tracking
@@ -341,21 +304,104 @@ func (d *Downloader) downloadSingleThread(ctx context.Context, stream Stream, te
 		progress.SetCallback(callback)
 	}
 
-	// Set initial progress if resuming
-	if resumeOffset > 0 {
-		progress.Add(resumeOffset)
+	// Prepare temp files for each chunk
+	tempFiles := make([]string, threads)
+	var wg sync.WaitGroup
+	errCh := make(chan error, threads)
+
+	for i := 0; i < threads; i++ {
+		start := int64(i) * chunkSize
+		end := start + chunkSize - 1
+		if i == threads-1 {
+			end = totalSize - 1
+		}
+		tempFiles[i] = fmt.Sprintf("%s.part%d", tempPath, i)
+
+		wg.Add(1)
+		go func(idx int, start, end int64, tempFile string) {
+			defer wg.Done()
+			// Check if chunk already exists and is complete
+			var existSize int64
+			if fi, err := os.Stat(tempFile); err == nil {
+				existSize = fi.Size()
+			}
+			if existSize >= (end - start + 1) {
+				progress.Add(end - start + 1)
+				return
+			}
+
+			req := d.ctx.client.R().
+				SetContext(ctx).
+				SetDoNotParseResponse(true)
+			req.Header = stream.Header.Clone()
+			req.SetHeader("Range", fmt.Sprintf("bytes=%d-%d", start+existSize, end))
+
+			resp, err := req.Get(stream.URL)
+			if err != nil {
+				errCh <- fmt.Errorf("chunk %d request failed: %w", idx, err)
+				return
+			}
+			defer resp.RawBody().Close()
+			if resp.StatusCode() != http.StatusPartialContent && resp.StatusCode() != http.StatusOK {
+				errCh <- fmt.Errorf("chunk %d HTTP error: %s", idx, resp.Status())
+				return
+			}
+
+			// Open file for append
+			f, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				errCh <- fmt.Errorf("chunk %d open file failed: %w", idx, err)
+				return
+			}
+			defer f.Close()
+
+			// Progress tracking for this chunk
+			reader := progress.NewReader(resp.RawBody())
+			if d.ctx.option.RateLimit > 0 {
+				reader = utils.NewRateLimiter(reader, d.ctx.option.RateLimit/int64(threads))
+			}
+			defer func() {
+				if c, ok := reader.(io.Closer); ok {
+					c.Close()
+				}
+			}()
+
+			_, err = d.copyWithContext(ctx, f, reader)
+			if err != nil {
+				errCh <- fmt.Errorf("chunk %d write failed: %w", idx, err)
+				return
+			}
+		}(i, start, end, tempFiles[i])
 	}
 
-	// Wrap response body with progress tracking
-	reader := progress.NewReader(resp.RawBody())
-	defer reader.Close()
+	wg.Wait()
+	close(errCh)
+	for e := range errCh {
+		if e != nil {
+			return e
+		}
+	}
 
-	// Copy with context checking
-	_, err = d.copyWithContext(ctx, file, reader)
+	// Step 4: Merge chunks
+	outFile, err := os.Create(tempPath)
 	if err != nil {
-		return fmt.Errorf("failed to write to output file: %w", err)
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+	for i := 0; i < threads; i++ {
+		f, err := os.Open(tempFiles[i])
+		if err != nil {
+			return fmt.Errorf("failed to open chunk %d: %w", i, err)
+		}
+		_, err = io.Copy(outFile, f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("failed to merge chunk %d: %w", i, err)
+		}
+		os.Remove(tempFiles[i])
 	}
 
+	progress.Finish()
 	return nil
 }
 
@@ -402,7 +448,14 @@ func (d *Downloader) downloadSingleThreadNoRange(ctx context.Context, stream Str
 	}
 
 	reader := progress.NewReader(resp.RawBody())
-	defer reader.Close()
+	if d.ctx.option.RateLimit > 0 {
+		reader = utils.NewRateLimiter(reader, d.ctx.option.RateLimit)
+	}
+	defer func() {
+		if c, ok := reader.(io.Closer); ok {
+			c.Close()
+		}
+	}()
 
 	_, err = d.copyWithContext(ctx, file, reader)
 	if err != nil {
@@ -434,7 +487,14 @@ func (d *Downloader) downloadM3U8Stream(ctx context.Context, stream Stream, temp
 	}
 
 	reader := progress.NewReader(data)
-	defer reader.Close()
+	if d.ctx.option.RateLimit > 0 {
+		reader = utils.NewRateLimiter(reader, d.ctx.option.RateLimit)
+	}
+	defer func() {
+		if c, ok := reader.(io.Closer); ok {
+			c.Close()
+		}
+	}()
 
 	_, err = d.copyWithContext(ctx, file, reader)
 	if err != nil {

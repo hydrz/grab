@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/go-resty/resty/v2"
 )
@@ -58,13 +59,16 @@ func NewApi(client *resty.Client) Api {
 
 	client.SetBaseURL(endpoint)
 
-	token := os.Getenv("GAODUN_AUTH_TOKEN")
+	if client.Header.Get("Authentication") == "" {
+		token := os.Getenv("GAODUN_AUTH_TOKEN")
+		client.SetHeader("Authentication", token)
+	}
+
 	xRequestedExtend := fmt.Sprintf(
 		`{"apiConfigVersion":"%s","appStore":"%s","appVersion":"%s","phoneBrand":"%s","appScheme":"%s","deviceId":"%s","appChannel":"%s","appChannelName":"%s"}`,
 		apiVersion, "oppo", "264", "oneplus", "gaodunapp", generateDeviceID(), "oppo", "android",
 	)
 	client.SetHeader("User-Agent", userAgent)
-	client.SetHeader("Authentication", token)
 	client.SetHeader("ApiVersion", apiVersion)
 	client.SetHeader("X-Requested-Extend", xRequestedExtend)
 	client.SetHeader("Host", "apigateway.gaodun.com")
@@ -75,6 +79,11 @@ func NewApi(client *resty.Client) Api {
 		if r.StatusCode() != http.StatusOK {
 			return fmt.Errorf("API request failed with status %d: %s", r.StatusCode(), r.String())
 		}
+
+		if strings.Contains(r.String(), "Unable to verify token") {
+			return fmt.Errorf("authentication failed: %w", ErrAbortWithResponse)
+		}
+
 		return nil
 	})
 

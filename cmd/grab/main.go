@@ -154,13 +154,24 @@ func setupFlags(cmd *cobra.Command, headerFlags *[]string) {
 	cmd.Flags().StringVarP(&option.Quality, "quality", "q", option.Quality, "Preferred video quality")
 	cmd.Flags().StringVarP(&option.Format, "format", "f", option.Format, "Output format")
 	// Network options
-	cmd.Flags().StringVarP(&option.Cookie, "cookies", "c", option.Cookie, "Cookie file path")
 	cmd.Flags().StringArrayVarP(headerFlags, "header", "H", nil, "Custom HTTP headers")
 	cmd.Flags().StringVarP(&option.UserAgent, "user-agent", "u", option.UserAgent, "Custom user agent")
 	cmd.Flags().StringVarP(&option.Proxy, "proxy", "x", option.Proxy, "HTTP proxy URL")
 	cmd.Flags().IntVarP(&option.RetryCount, "retry", "r", option.RetryCount, "Number of retry attempts")
 	cmd.Flags().DurationVarP(&option.Timeout, "timeout", "t", option.Timeout, "Request timeout")
 	cmd.Flags().BoolVar(&option.NoCache, "no-cache", option.NoCache, "Disable HTTP caching")
+	cmd.Flags().Int64Var(&option.RateLimit, "rate-limit", option.RateLimit, "Download speed limit in bytes per second")
+
+	// Advanced authentication
+	cmd.Flags().StringVar(&option.AuthType, "auth-type", option.AuthType, "Authentication type (basic, bearer, header)")
+	cmd.Flags().StringVar(&option.AuthUser, "auth-user", option.AuthUser, "Username for basic auth")
+	cmd.Flags().StringVar(&option.AuthPass, "auth-pass", option.AuthPass, "Password for basic auth")
+	cmd.Flags().StringVar(&option.AuthToken, "auth-token", option.AuthToken, "Token for bearer auth")
+	cmd.Flags().StringVar(&option.AuthHeader, "auth-header", option.AuthHeader, "Custom header for auth (e.g. 'X-API-Key: ...')")
+	// Cookie handling
+	cmd.Flags().StringVarP(&option.Cookie, "cookies", "c", option.Cookie, "Path to cookie file for authentication")
+	cmd.Flags().MarkHidden("cookies") // Hide this flag from help output
+
 	// Download options
 	cmd.Flags().IntVarP(&option.Threads, "threads", "n", option.Threads, "Number of concurrent download threads")
 	cmd.Flags().Int64Var(&option.ChunkSize, "chunk-size", option.ChunkSize, "Download chunk size in bytes")

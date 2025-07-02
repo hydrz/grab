@@ -24,13 +24,23 @@ type Option struct {
 	Format  string // Output format, e.g. "mp4", "mkv", "mp3" (--format, -f)
 
 	// Network options
-	Cookie     string        // Cookie file path for authentication (--cookies, -c)
 	Headers    http.Header   // Custom HTTP headers (--header, -H)
 	UserAgent  string        // Custom user agent (--user-agent, -u)
 	Proxy      string        // HTTP proxy URL (--proxy, -x)
 	RetryCount int           // Number of retry attempts (--retry, -r)
 	Timeout    time.Duration // Request timeout (--timeout, -t)
 	NoCache    bool          // Disable caching (--no-cache)
+
+	// Rate limit (bytes per second), 0 means unlimited
+	RateLimit int64 // Download speed limit (--rate-limit)
+
+	// Advanced authentication
+	AuthType   string // Authentication type: "", "basic", "bearer", "header" (--auth-type)
+	AuthUser   string // Username for basic auth (--auth-user)
+	AuthPass   string // Password for basic auth (--auth-pass)
+	AuthToken  string // Token for bearer auth (--auth-token)
+	AuthHeader string // Custom header for auth, e.g. "X-API-Key: ..." (--auth-header)
+	Cookie     string // Cookie file path for authentication (--cookies, -c)
 
 	// Download options
 	Threads        int   // Number of concurrent download threads (--threads, -n)
