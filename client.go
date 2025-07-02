@@ -30,7 +30,7 @@ func newClient(o Option) *resty.Client {
 		client.SetBasicAuth(o.AuthUser, o.AuthPass)
 	}
 	if o.AuthToken != "" {
-		client.SetAuthToken(o.AuthToken)
+		o.Headers.Set("Authorization", "Bearer "+o.AuthToken)
 	}
 	if o.AuthHeader != "" {
 		// Format: "Key: Value"
