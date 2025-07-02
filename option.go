@@ -124,7 +124,7 @@ func (o *Option) Combine(other Option) {
 
 var DefaultOptions = &Option{
 	OutputPath: "./downloads",
-	RetryCount: 3,
+	RetryCount: 5,
 	Timeout:    30 * time.Second,
 	Threads:    max(4, runtime.NumCPU()), // Use at least 4 threads or number of CPU cores
 	ChunkSize:  1024 * 1024,              // 1 MB

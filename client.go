@@ -52,8 +52,8 @@ func newClient(o Option) *resty.Client {
 	// Configure retry behavior
 	if o.RetryCount > 0 {
 		client.SetRetryCount(o.RetryCount)
-		client.SetRetryWaitTime(1 * time.Second)
-		client.SetRetryMaxWaitTime(10 * time.Second)
+		client.SetRetryWaitTime(3 * time.Second)
+		client.SetRetryMaxWaitTime(30 * time.Second)
 
 		// Add retry conditions - don't retry on 4xx errors except specific ones
 		client.AddRetryCondition(func(r *resty.Response, _ error) bool {
