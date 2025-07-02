@@ -216,19 +216,7 @@ func (d *Downloader) downloadStream(ctx context.Context, stream Stream) error {
 	if stream.Type == StreamTypeM3u8 {
 		err = d.downloadM3U8Stream(ctx, stream, tempPath)
 	} else {
-		// Check if we should use chunked download
-		if d.ctx.option.ChunkSize > 0 {
-			supportsRange, size := d.checkRangeSupport(ctx, stream)
-			if supportsRange && size > d.ctx.option.ChunkSize && size > 0 {
-				d.ctx.logger.Debug("Using chunked download", "stream", stream.ID, "size", size, "chunks", d.ctx.option.Threads)
-				err = d.downloadWithChunks(ctx, stream, tempPath, size)
-			} else {
-				d.ctx.logger.Debug("Using single thread download", "stream", stream.ID, "reason", "range not supported or small file")
-				err = d.downloadSingleThread(ctx, stream, tempPath)
-			}
-		} else {
-			err = d.downloadSingleThread(ctx, stream, tempPath)
-		}
+		err = d.downloadSingleThread(ctx, stream, tempPath)
 	}
 
 	if err != nil {
@@ -260,83 +248,6 @@ func (d *Downloader) downloadStream(ctx context.Context, stream Stream) error {
 	}
 
 	return nil
-}
-
-// checkRangeSupport checks if the server supports HTTP range requests safely.
-// Returns whether range is supported and the total file size.
-func (d *Downloader) checkRangeSupport(ctx context.Context, stream Stream) (bool, int64) {
-	// First try HEAD request to get basic info
-	req := d.ctx.client.R().SetContext(ctx)
-	req.Header = stream.Header.Clone()
-
-	resp, err := req.Head(stream.URL)
-	if err != nil {
-		d.ctx.logger.Debug("HEAD request failed, assuming no range support", "error", err)
-		return false, 0
-	}
-
-	// Check Accept-Ranges header
-	acceptsRanges := strings.ToLower(resp.Header().Get("Accept-Ranges")) == "bytes"
-
-	// Get file size from Content-Length
-	var totalSize int64
-	if contentLength := resp.Header().Get("Content-Length"); contentLength != "" {
-		if size, err := strconv.ParseInt(contentLength, 10, 64); err == nil {
-			totalSize = size
-		}
-	}
-
-	// If server explicitly says it accepts ranges, try a small range request
-	if acceptsRanges && totalSize > 0 {
-		rangeReq := d.ctx.client.R().
-			SetContext(ctx).
-			SetHeader("Range", "bytes=0-1023") // Request first 1KB
-		rangeReq.Header = stream.Header.Clone()
-
-		rangeResp, err := rangeReq.Head(stream.URL)
-		if err != nil {
-			d.ctx.logger.Debug("Range test failed", "error", err)
-			return false, totalSize
-		}
-
-		// Check if we get 206 Partial Content
-		if rangeResp.StatusCode() == http.StatusPartialContent {
-			d.ctx.logger.Debug("Range support confirmed", "stream", stream.ID, "size", totalSize)
-			return true, totalSize
-		}
-
-		// If we get 200 OK, server ignores range header
-		if rangeResp.StatusCode() == http.StatusOK {
-			d.ctx.logger.Debug("Server ignores range requests", "stream", stream.ID)
-			return false, totalSize
-		}
-	}
-
-	return false, totalSize
-}
-
-// downloadWithChunks performs multi-threaded download with resume capability
-func (d *Downloader) downloadWithChunks(ctx context.Context, stream Stream, tempPath string, totalSize int64) error {
-	downloader := &chunkDownloader{
-		client:     d.ctx.client,
-		url:        stream.URL,
-		headers:    stream.Header,
-		totalSize:  totalSize,
-		chunkSize:  d.ctx.option.ChunkSize,
-		threads:    d.ctx.option.Threads,
-		outputPath: tempPath, // Use tempPath with .part suffix
-		ctx:        ctx,
-		logger:     d.ctx.logger,
-	}
-
-	// Setup progress tracking
-	progress := newProgress(totalSize, fmt.Sprintf("Downloading %s", stream.Title))
-	if callback := d.ctx.GetProgressCallback(); callback != nil {
-		progress.SetCallback(callback)
-	}
-	downloader.progress = progress
-
-	return downloader.Download()
 }
 
 // downloadSingleThread performs single-threaded download with resume capability
