@@ -36,7 +36,7 @@ func newClient(o Option) *resty.Client {
 		// Format: "Key: Value"
 		parts := strings.SplitN(o.AuthHeader, ":", 2)
 		if len(parts) == 2 {
-			client.SetHeader(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+			o.Headers.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 		}
 	}
 
