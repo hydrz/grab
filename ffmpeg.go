@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// ConvertFormat uses ffmpeg to convert input file to the specified format.
+// convertFormat uses ffmpeg to convert input file to the specified format.
 // Returns the output file path or error.
-func ConvertFormat(inputPath, outputFormat string) (string, error) {
+func convertFormat(inputPath, outputFormat string) (string, error) {
 	ffmpegBin := "ffmpeg"
 	if runtime.GOOS == "windows" {
 		ffmpegBin = "ffmpeg.exe"

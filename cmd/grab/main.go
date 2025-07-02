@@ -164,7 +164,7 @@ func setupFlags(cmd *cobra.Command, headerFlags *[]string) {
 	// Download options
 	cmd.Flags().IntVarP(&option.Threads, "threads", "n", option.Threads, "Number of concurrent download threads")
 	cmd.Flags().Int64Var(&option.ChunkSize, "chunk-size", option.ChunkSize, "Download chunk size in bytes")
-	cmd.Flags().BoolVarP(&option.SkipExisting, "skip", "s", option.SkipExisting, "Skip download if file already exists")
+	cmd.Flags().BoolVarP(&option.NoSkipExisting, "no-skip", "S", option.NoSkipExisting, "Do not skip existing files")
 	// Behavior options
 	cmd.Flags().BoolVarP(&option.ExtractOnly, "info", "i", option.ExtractOnly, "Only extract media info, do not download")
 	cmd.Flags().BoolVarP(&option.Playlist, "playlist", "p", option.Playlist, "Download all videos in playlist")

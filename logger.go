@@ -5,7 +5,8 @@ import (
 	"os"
 )
 
-func NewLogger(o Option) *slog.Logger {
+// newLogger creates a logger for internal use.
+func newLogger(o Option) *slog.Logger {
 	level := slog.LevelWarn
 	if o.Debug {
 		level = slog.LevelDebug

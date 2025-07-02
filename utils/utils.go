@@ -24,7 +24,7 @@ func FormatBytes(bytes int64) string {
 // FormatDuration formats a duration in seconds to a human-readable string
 func FormatDuration(seconds time.Duration) string {
 	if seconds < 0 {
-		return "N/A"
+		return "00:00"
 	}
 	hours := int(seconds.Hours())
 	minutes := int(seconds.Minutes()) % 60

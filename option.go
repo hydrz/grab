@@ -15,31 +15,44 @@ const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 // Callers should ensure OutputPath exists or is creatable.
 // Threads should be >=1; ChunkSize in bytes.
 type Option struct {
-	OutputPath    string        // Output directory for downloaded files (--output-dir, -o)
-	OutputName    string        // Output filename (--output-filename, -O)
-	Quality       string        // Preferred video quality, e.g. "best", "worst", "720p" (--quality, -q)
-	Format        string        // Output format, e.g. "mp4", "mkv", "mp3" (--format, -f)
-	Cookie        string        // Cookie file path for authentication (--cookies, -c)
-	Headers       http.Header   // Custom HTTP headers (--header, -H)
-	UserAgent     string        // Custom user agent (--user-agent, -u)
-	Proxy         string        // HTTP proxy URL (--proxy, -x)
-	RetryCount    int           // Number of retry attempts (--retry, -r)
-	Timeout       time.Duration // Request timeout (--timeout, -t)
-	Threads       int           // Number of concurrent download threads (--threads, -n)
-	ChunkSize     int64         // Download chunk size in bytes
-	SkipExisting  bool          // Skip download if file already exists (--skip, -s)
-	ExtractOnly   bool          // Only extract media info, do not download (--info, -i)
-	Playlist      bool          // Download all videos in playlist (--playlist, -p)
-	PlaylistStart int           // Playlist start index (--playlist-start)
-	PlaylistEnd   int           // Playlist end index (--playlist-end)
-	Subtitle      bool          // Download subtitles (--subtitle)
-	VideoOnly     bool          // Download video only, no audio (--video-only)
-	AudioOnly     bool          // Download audio only (--audio-only)
-	IgnoreErrors  bool          // Continue on errors (--ignore-errors)
-	Debug         bool          // Enable debug logging (--debug, -d)
-	Verbose       bool          // Enable verbose output (--verbose, -v)
-	Silent        bool          // Suppress all output except errors (--silent)
-	NoCache       bool          // Disable caching (--no-cache)
+	// Output options
+	OutputPath string // Output directory for downloaded files (--output-dir, -o)
+	OutputName string // Output filename (--output-filename, -O)
+
+	// Quality and format
+	Quality string // Preferred video quality, e.g. "best", "worst", "720p" (--quality, -q)
+	Format  string // Output format, e.g. "mp4", "mkv", "mp3" (--format, -f)
+
+	// Network options
+	Cookie     string        // Cookie file path for authentication (--cookies, -c)
+	Headers    http.Header   // Custom HTTP headers (--header, -H)
+	UserAgent  string        // Custom user agent (--user-agent, -u)
+	Proxy      string        // HTTP proxy URL (--proxy, -x)
+	RetryCount int           // Number of retry attempts (--retry, -r)
+	Timeout    time.Duration // Request timeout (--timeout, -t)
+	NoCache    bool          // Disable caching (--no-cache)
+
+	// Download options
+	Threads        int   // Number of concurrent download threads (--threads, -n)
+	ChunkSize      int64 // Download chunk size in bytes
+	NoSkipExisting bool  // Do not skip existing files (--no-skip, -S)
+
+	// Behavior options
+	ExtractOnly   bool // Only extract media info, do not download (--info, -i)
+	Playlist      bool // Download all videos in playlist (--playlist, -p)
+	PlaylistStart int  // Playlist start index (--playlist-start)
+	PlaylistEnd   int  // Playlist end index (--playlist-end)
+
+	// Content options
+	Subtitle     bool // Download subtitles (--subtitle)
+	VideoOnly    bool // Download video only, no audio (--video-only)
+	AudioOnly    bool // Download audio only (--audio-only)
+	IgnoreErrors bool // Continue on errors (--ignore-errors)
+
+	// Error handling and logging
+	Debug   bool // Enable debug logging (--debug, -d)
+	Verbose bool // Enable verbose output (--verbose, -v)
+	Silent  bool // Suppress all output except errors (--silent)
 }
 
 func (o *Option) Combine(other Option) {
@@ -80,8 +93,8 @@ func (o *Option) Combine(other Option) {
 		o.ChunkSize = other.ChunkSize
 	}
 
-	o.SkipExisting = o.SkipExisting || other.SkipExisting
-	o.ExtractOnly = o.ExtractOnly || other.ExtractOnly
+	o.NoSkipExisting = other.NoSkipExisting
+	o.ExtractOnly = other.ExtractOnly
 
 	o.Playlist = o.Playlist || other.Playlist
 	if other.PlaylistStart > 0 {

@@ -35,12 +35,12 @@ func TestFormatDuration(t *testing.T) {
 		input time.Duration
 		want  string
 	}{
-		{-1, "0:00"},
-		{0, "0:00"},
-		{5, "0:05"},
-		{65, "1:05"},
-		{3600, "1:00:00"},
-		{3661, "1:01:01"},
+		{-1, "00:00"},
+		{0, "00:00"},
+		{5 * time.Second, "00:05"},
+		{65 * time.Second, "01:05"},
+		{3600 * time.Second, "01:00:00"},
+		{3661 * time.Second, "01:01:01"},
 	}
 	for _, tt := range tests {
 		got := FormatDuration(tt.input)

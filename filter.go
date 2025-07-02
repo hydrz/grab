@@ -13,31 +13,31 @@ type Filter interface {
 
 // QualityFilter filters streams by quality.
 // Supports "best" (default, highest quality), "worst" (lowest quality), or exact match.
-type QualityFilter string
+type qualityFilter string
 
-func (q QualityFilter) Filter(stream Stream) bool {
-	// "best" and "worst" handled in FiltersForStreams, here only exact match
+func (q qualityFilter) Filter(stream Stream) bool {
+	// "best" and "worst" handled in filtersForStreams, here only exact match
 	return q == "" || strings.EqualFold(stream.Quality, string(q))
 }
 
 // VideoOnlyFilter filters only video or m3u8 streams.
-type VideoOnlyFilter struct{}
+type videoOnlyFilter struct{}
 
-func (f *VideoOnlyFilter) Filter(stream Stream) bool {
+func (f *videoOnlyFilter) Filter(stream Stream) bool {
 	return stream.Type == StreamTypeVideo || stream.Type == StreamTypeM3u8
 }
 
 // AudioOnlyFilter filters only audio streams.
-type AudioOnlyFilter struct{}
+type audioOnlyFilter struct{}
 
-func (f *AudioOnlyFilter) Filter(stream Stream) bool {
+func (f *audioOnlyFilter) Filter(stream Stream) bool {
 	return stream.Type == StreamTypeAudio
 }
 
 // NoSubtitleFilter filters out subtitle streams.
-type NoSubtitleFilter struct{}
+type noSubtitleFilter struct{}
 
-func (f *NoSubtitleFilter) Filter(stream Stream) bool {
+func (f *noSubtitleFilter) Filter(stream Stream) bool {
 	return stream.Type != StreamTypeSubtitle
 }
 
@@ -70,9 +70,9 @@ func (f *PlaylistFilter) Filter(stream Stream) bool {
 	return false
 }
 
-// FiltersForStreams returns a list of filters based on Option.
+// filtersForStreams returns a list of filters based on Option.
 // If Quality is "best" or empty, will only keep the highest quality stream.
-func (o *Option) FiltersForStreams(streams []Stream) []Filter {
+func (o *Option) filtersForStreams(streams []Stream) []Filter {
 	var filters []Filter
 	quality := o.Quality
 	if quality == "" {
@@ -106,18 +106,18 @@ func (o *Option) FiltersForStreams(streams []Stream) []Filter {
 		} else {
 			target = order[len(order)-1]
 		}
-		filters = append(filters, QualityFilter(target))
+		filters = append(filters, qualityFilter(target))
 	} else if quality != "" {
-		filters = append(filters, QualityFilter(quality))
+		filters = append(filters, qualityFilter(quality))
 	}
 	if o.VideoOnly {
-		filters = append(filters, &VideoOnlyFilter{})
+		filters = append(filters, &videoOnlyFilter{})
 	}
 	if o.AudioOnly {
-		filters = append(filters, &AudioOnlyFilter{})
+		filters = append(filters, &audioOnlyFilter{})
 	}
 	if !o.Subtitle {
-		filters = append(filters, &NoSubtitleFilter{})
+		filters = append(filters, &noSubtitleFilter{})
 	}
 	if o.PlaylistStart > 0 || o.PlaylistEnd > 0 {
 		filters = append(filters, &PlaylistFilter{

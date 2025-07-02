@@ -93,22 +93,25 @@ func (m *Media) String() string {
 	return output.String()
 }
 
-type ExtractorFactory func(ctx *Context) Extractor
+type extractorFactory func(ctx *Context) Extractor
 
+// Extractor defines the interface for media extractors.
 type Extractor interface {
 	CanExtract(url string) bool
 	Extract(url string) ([]Media, error)
 }
 
-var extractors = make(map[string]ExtractorFactory)
+var extractors = make(map[string]extractorFactory)
 var lock sync.RWMutex
 
-func Register(name string, f ExtractorFactory) {
+// Register registers an extractor factory for internal use.
+func Register(name string, f extractorFactory) {
 	lock.Lock()
 	defer lock.Unlock()
 	extractors[name] = f
 }
 
+// FindExtractor finds a suitable extractor for the given URL.
 func FindExtractor(ctx *Context, url string) (Extractor, error) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -122,6 +125,7 @@ func FindExtractor(ctx *Context, url string) (Extractor, error) {
 	return nil, ErrNoExtractorFound
 }
 
+// ListExtractors returns the names of all registered extractors.
 func ListExtractors() []string {
 	lock.RLock()
 	defer lock.RUnlock()

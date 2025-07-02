@@ -7,6 +7,7 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+// Context implements the Context for internal use.
 type Context struct {
 	ctx              context.Context
 	option           Option
@@ -17,8 +18,8 @@ type Context struct {
 
 // NewContext creates a new Context with the provided options.
 func NewContext(ctx context.Context, option Option) *Context {
-	client := NewClient(option)
-	logger := NewLogger(option)
+	client := newClient(option)
+	logger := newLogger(option)
 	return &Context{
 		ctx:    ctx,
 		option: option,
@@ -43,7 +44,7 @@ func (c *Context) Option() Option {
 // Client returns the resty client associated with this Context.
 func (c *Context) Client() *resty.Client {
 	if c.client == nil {
-		c.client = NewClient(c.Option())
+		c.client = newClient(c.Option())
 	}
 	return c.client
 }
@@ -51,7 +52,7 @@ func (c *Context) Client() *resty.Client {
 // Logger returns the logger associated with this Context.
 func (c *Context) Logger() *slog.Logger {
 	if c.logger == nil {
-		c.logger = NewLogger(c.Option())
+		c.logger = newLogger(c.Option())
 	}
 	return c.logger
 }

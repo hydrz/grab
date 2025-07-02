@@ -110,4 +110,5 @@ yarn.lock
 local/
 dev-data/
 
-downloads
+downloads/
+./bin/

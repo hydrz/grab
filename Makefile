@@ -1,6 +1,7 @@
 # Project configuration
 MOD_NAME := github.com/hydrz/grab
 BINARY_NAME := $(shell basename $(MOD_NAME))
+CMD := ./cmd/grab
 
 # Build variables
 VERSION := $(shell git describe --tags --always --match='v*' 2>/dev/null || echo "dev")
@@ -53,7 +54,7 @@ rename: ## Rename Go module (interactive)
 
 .PHONY: run
 run: ## Run the application
-	@CGO_ENABLED=0 $(GO) run -ldflags="$(LDFLAGS)" ./...
+	@CGO_ENABLED=0 $(GO) run -ldflags="$(LDFLAGS)" $(CMD)
 
 fmt: ## Format code
 	@$(GO) fmt ./...
@@ -95,7 +96,7 @@ bench: ## Run benchmarks
 build: ## Build binary
 	@echo "$(BLUE)Building $(BINARY_NAME)...$(RESET)"
 	@mkdir -p bin
-	@CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o bin/$(BINARY_NAME) ./...
+	@CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o bin/$(BINARY_NAME) $(CMD)
 	@echo "$(GREEN)Built: bin/$(BINARY_NAME)$(RESET)"
 
 .PHONY: build-all
@@ -107,14 +108,15 @@ build-all: ## Build for multiple platforms
 			echo "Building $$os/$$arch..."; \
 			GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build \
 				-ldflags="$(LDFLAGS)" \
-				-o bin/$(BINARY_NAME)-$$os-$$arch ./...; \
+				-o bin/$(BINARY_NAME)-$$os-$$arch$$([ "$$os" = "windows" ] && echo ".exe") \
+				$(CMD); \
 		done; \
 	done
 	@echo "$(GREEN)Multi-platform build completed!$(RESET)"
 
 .PHONY: install
 install: ## Install binary to GOPATH/bin
-	@CGO_ENABLED=0 $(GO) install -ldflags="$(LDFLAGS)" ./...
+	@CGO_ENABLED=0 $(GO) install -ldflags="$(LDFLAGS)" $(CMD)
 
 
 ##@ Release
@@ -133,6 +135,7 @@ release: ## Create release with goreleaser
 clean: ## Clean build artifacts and caches
 	@$(GO) clean -cache -testcache -modcache
 	@rm -rf bin/ dist/ coverage.out coverage.html
+	@rm -rf downloads/
 	@echo "$(GREEN)Cleaned!$(RESET)"
 
 .PHONY: check
