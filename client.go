@@ -1,14 +1,10 @@
 package grab
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/gregjones/httpcache"
-	"github.com/gregjones/httpcache/diskcache"
 	"github.com/hydrz/grab/utils"
 )
 
@@ -97,14 +93,6 @@ func newClient(o Option) *resty.Client {
 	// Disable debug by default, enable only if explicitly requested
 	if o.Debug {
 		client.SetDebug(true)
-	}
-
-	// Setup caching if not disabled
-	if !o.NoCache {
-		cachePath := filepath.Join(os.TempDir(), "grab_cache")
-		cache := diskcache.New(cachePath)
-		transport := httpcache.NewTransport(cache)
-		client.SetTransport(transport)
 	}
 
 	// Set additional headers for better compatibility

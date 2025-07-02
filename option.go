@@ -29,7 +29,6 @@ type Option struct {
 	Proxy      string        // HTTP proxy URL (--proxy, -x)
 	RetryCount int           // Number of retry attempts (--retry, -r)
 	Timeout    time.Duration // Request timeout (--timeout, -t)
-	NoCache    bool          // Disable caching (--no-cache)
 
 	// Rate limit (bytes per second), 0 means unlimited
 	RateLimit int64 // Download speed limit (--rate-limit)
@@ -121,7 +120,6 @@ func (o *Option) Combine(other Option) {
 	o.Debug = o.Debug || other.Debug
 	o.Verbose = o.Verbose || other.Verbose
 	o.Silent = o.Silent || other.Silent
-	o.NoCache = o.NoCache || other.NoCache
 }
 
 var DefaultOptions = &Option{

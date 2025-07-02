@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/gregjones/httpcache"
+	"github.com/gregjones/httpcache/diskcache"
 )
 
 const (
@@ -74,6 +77,11 @@ func NewApi(client *resty.Client) Api {
 	client.SetHeader("Host", "apigateway.gaodun.com")
 	client.SetHeader("Connection", "Keep-Alive")
 	client.SetHeader("Accept-Encoding", "gzip")
+
+	cachePath := filepath.Join(os.TempDir(), "gaodun_cache")
+	cache := diskcache.New(cachePath)
+	transport := httpcache.NewTransport(cache)
+	client.SetTransport(transport)
 
 	client.OnAfterResponse(func(c *resty.Client, r *resty.Response) error {
 		if r.StatusCode() != http.StatusOK {

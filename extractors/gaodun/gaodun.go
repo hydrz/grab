@@ -18,7 +18,7 @@ func init() {
 	grab.Register("gaodun", func(ctx *grab.Context) grab.Extractor {
 		return &extractor{
 			ctx: ctx,
-			api: NewApi(ctx.Client()),
+			api: NewApi(ctx.Client().Clone()),
 		}
 	})
 }

@@ -159,7 +159,6 @@ func setupFlags(cmd *cobra.Command, headerFlags *[]string) {
 	cmd.Flags().StringVarP(&option.Proxy, "proxy", "x", option.Proxy, "HTTP proxy URL")
 	cmd.Flags().IntVarP(&option.RetryCount, "retry", "r", option.RetryCount, "Number of retry attempts")
 	cmd.Flags().DurationVarP(&option.Timeout, "timeout", "t", option.Timeout, "Request timeout")
-	cmd.Flags().BoolVar(&option.NoCache, "no-cache", option.NoCache, "Disable HTTP caching")
 	cmd.Flags().Int64Var(&option.RateLimit, "rate-limit", option.RateLimit, "Download speed limit in bytes per second")
 
 	// Advanced authentication
